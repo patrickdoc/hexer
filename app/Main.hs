@@ -5,6 +5,7 @@ import Show
 
 import Language.Haskell.HLint
 import GHC.Hs
+import GHC.Hs.Dump
 import GHC.Types.SrcLoc
 import GHC.Utils.Outputable (defaultSDocContext, ppr, printSDocLn, sdocPprDebug)
 import GHC.Utils.Ppr
@@ -34,12 +35,12 @@ main = do
         Nothing -> putStrLn "Failed to parse module"
 
 printModule :: Located HsModule -> IO ()
-printModule x = putStrLn $ show (hsmodDecls (unLoc x))
+printModule x = printSDocLn sdocCtx (PageMode True) stdout $ showAstDataFull (hsmodDecls (unLoc x))
 --printModule x = printSDocLn sdocCtx (PageMode True) stdout $ ppr x
---  where
---    sdocCtx = defaultSDocContext {
---        sdocPprDebug = True
---    }
+  where
+    sdocCtx = defaultSDocContext {
+        sdocPprDebug = True
+    }
 
 ----------------------------------------
 -- HLint
