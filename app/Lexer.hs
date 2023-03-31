@@ -1,21 +1,15 @@
 module Lexer where
 
-import Language.Haskell.HLint
-import GHC.Hs
-import GHC.Types.SrcLoc
-import GHC.Utils.Outputable (defaultSDocContext, printSDocLn, sdocPprDebug)
-import GHC.Utils.Ppr
-import System.Environment
-import System.IO
-
 -- Flatparse
-import FlatParse.Basic hiding (Parser, runParser, string, char, cut)
-import qualified FlatParse.Basic as FP
+import FlatParse.Stateful hiding (Parser, runParser, string, char, cut)
+import qualified FlatParse.Stateful as FP
 import qualified Data.ByteString as B
 import Data.String
 import "template-haskell" Language.Haskell.TH
 
-type Parser = FP.Parser Error
+type Parser = FP.Parser State Error
+
+type State = B.ByteString
 
 -- | An expected item which is displayed in error messages.
 data Expected
@@ -123,7 +117,7 @@ isKeyword span = inSpan span do
 
 -- | Parse a non-keyword string.
 symbol :: String -> Q Exp
-symbol str = [| token $(FP.string str) |]
+symbol str = [| $(FP.string str) |]
 
 -- | Parser a non-keyword string, throw precise error on failure.
 symbol' :: String -> Q Exp
@@ -131,7 +125,7 @@ symbol' str = [| $(symbol str) `cut'` Lit str |]
 
 -- | Parse a keyword string.
 keyword :: String -> Q Exp
-keyword str = [| token ($(FP.string str) `notFollowedBy` identChar) |]
+keyword str = [| $(FP.string str) `notFollowedBy` identChar |]
 
 -- | Parse a keyword string, throw precise error on failure.
 keyword' :: String -> Q Exp
