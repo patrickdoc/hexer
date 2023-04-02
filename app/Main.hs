@@ -1,3 +1,4 @@
+{-# LANGUAGE TemplateHaskell #-}
 module Main where
 
 import Lexer
@@ -61,7 +62,7 @@ useFlatparse file = do
     str <- B.readFile file
     case FP.runParser psMod str 0 str of
         Err e    -> do
-            putStrLn $ show e
+            print e
             return Nothing
         OK a _ _ -> return $ Just a
         Fail     -> do
@@ -74,7 +75,7 @@ psMod = do
     (x, s) <- withSpan' varid
     ws
     $(keyword "where") <* ws
-    d1 <- psLHsDecl
+    d1 <- psLHsDecl <* ws
     d2 <- fDecl2
     str <- ask
     return $ mkGeneralLocated "1:1" (hsMod { hsmodName = Just (mkModName x s str)
@@ -106,7 +107,7 @@ psLHsDecl = withSpan psTypeSig buildHsDecl
     buildHsDecl :: Sig GhcPs -> Span -> Parser (LHsDecl GhcPs)
     buildHsDecl x s = do
         str <- ask
-        pure $ L (srcSpanAnnListItem s str) (SigD NoExtField (x))
+        pure $ L (srcSpanAnnListItem s str) (SigD NoExtField x)
 
 psLIdP :: Parser (LIdP GhcPs)
 psLIdP = withSpan varOcc' buildLIdP
@@ -142,7 +143,7 @@ psTypeSig = do
     ws
     (_, s') <- withSpan' $(symbol' "::")
     ws
-    hswc <- withSpan' $ psHsWC `cut'` (Msg "HsWC")
+    hswc <- withSpan' $ psHsWC `cut'` Msg "HsWC"
     buildTypeSig x s' hswc
   where
     buildTypeSig :: (LIdP GhcPs, Span) -> Span -> (LHsSigWcType GhcPs, Span) -> Parser (Sig GhcPs)
@@ -181,9 +182,9 @@ psTupleTy = do
 
 psTyApp :: Parser (HsType GhcPs)
 psTyApp = do
-    x <- psTyVar `cut'` (Msg "IO")
+    x <- psTyVar `cut'` Msg "IO"
     ws
-    y <- psTupleTy `cut'` (Msg "()")
+    y <- psTupleTy `cut'` Msg "()"
     pure $ HsAppTy NoExtField x y
 
 ---
@@ -193,8 +194,62 @@ psTyApp = do
 
 fDecl2 :: Parser (LHsDecl GhcPs)
 fDecl2 = do
-    return $ mkHsDecl
+    idp <- psLIdP <* ws
+    rhs <- psGRHSs
+    pure $ mkHsDecl idp rhs
   where
+    mkHsDecl :: LIdP GhcPs -> GRHSs GhcPs (LocatedA (HsExpr GhcPs)) -> LHsDecl GhcPs
+    mkHsDecl idp rhs = L
+        spn
+        (ValD NoExtField (FunBind NoExtField
+                                  idp
+                                  (MG NoExtField
+                                      (L dSpn [L dSpn (Match matchAnn
+                                                              (FunRhs idp Prefix NoSrcStrict)
+                                                              []
+                                                              rhs)])
+                                      FromSource)
+                                  []
+        ))
+
+    psGRHSs :: Parser (GRHSs GhcPs (LocatedA (HsExpr GhcPs)))
+    psGRHSs = withSpan psHsExpr buildGRHSs
+      where
+        buildGRHSs :: HsExpr GhcPs -> Span -> Parser (GRHSs GhcPs (LocatedA (HsExpr GhcPs)))
+        buildGRHSs x s = do
+            str <- ask
+            pure $ GRHSs (EpaComments []) [L nSpn (GRHS grhsAnn [] (L (srcSpanEpAnnNotUsed s str) x))] (EmptyLocalBinds NoExtField)
+ 
+    psHsExpr :: Parser (HsExpr GhcPs)
+    psHsExpr = withSpan psDo buildHsDo
+      where
+        buildHsDo :: XRec GhcPs [ExprLStmt GhcPs] -> Span -> Parser (HsExpr GhcPs)
+        buildHsDo x s = do
+            str <- ask
+            pure $ HsDo (srcSpanAnnDo s str) (DoExpr Nothing) x
+    
+    psDo :: Parser (XRec GhcPs [ExprLStmt GhcPs])
+    psDo = pure $ L (SrcSpanAnn doExprAnn (RealSrcSpan dSrcSpn S.Nothing))
+        [ L dSpn (BodyStmt NoExtField
+                           (L dSpn (HsApp noEpAnn (L dSpn (HsVar NoExtField (L dSpn (mkRdrUnqual (mkVarOcc "putStrLn")))))
+                                                  (L dSpn (HsLit noEpAnn (HsString (SourceText "\"Hello world\"") (mkFastString "Hello world"))))))
+                           NoExtField
+                           NoExtField)
+        ]
+
+
+    doAnn    = EpAnn (Anchor dSrcSpn UnchangedAnchor)
+                     (AnnList (Just (Anchor dSrcSpn UnchangedAnchor)) Nothing Nothing [AddEpAnn AnnDo (EpaSpan dSrcSpn)] [])
+                     (EpaComments [])
+
+    doExprAnn  = EpAnn (Anchor dSrcSpn UnchangedAnchor)
+                     (AnnList (Just (Anchor dSrcSpn UnchangedAnchor)) Nothing Nothing [] [])
+                     (EpaComments [])
+
+    noEpAnn    = EpAnn (Anchor dSrcSpn UnchangedAnchor)
+                     NoEpAnns
+                     (EpaComments [])
+
     spn =
         (SrcSpanAnn  { ann = EpAnn (Anchor rlSrcSpn UnchangedAnchor)
                                    (AnnListItem [])
@@ -215,46 +270,12 @@ fDecl2 = do
         , locA = RealSrcSpan dSrcSpn S.Nothing
         }
 
-    matchAnn = EpAnn (Anchor (dSrcSpn) UnchangedAnchor)
+    matchAnn = EpAnn (Anchor dSrcSpn UnchangedAnchor)
                      []
                      (EpaComments [])
-    grhsAnn  = EpAnn (Anchor (dSrcSpn) UnchangedAnchor)
+    grhsAnn  = EpAnn (Anchor dSrcSpn UnchangedAnchor)
                      (GrhsAnn Nothing (AddEpAnn AnnEqual (EpaSpan dSrcSpn)))
                      (EpaComments [])
-    doAnn    = EpAnn (Anchor (dSrcSpn) UnchangedAnchor)
-                     (AnnList (Just (Anchor (dSrcSpn) UnchangedAnchor)) Nothing Nothing [(AddEpAnn AnnDo (EpaSpan dSrcSpn))] [])
-                     (EpaComments [])
-
-
-    doExprAnn  = EpAnn (Anchor (dSrcSpn) UnchangedAnchor)
-                     (AnnList (Just (Anchor (dSrcSpn) UnchangedAnchor)) Nothing Nothing [] [])
-                     (EpaComments [])
-
-    noEpAnn    = EpAnn (Anchor (dSrcSpn) UnchangedAnchor)
-                     NoEpAnns
-                     (EpaComments [])
-
-    mkHsDecl :: LHsDecl GhcPs
-    mkHsDecl = L
-        spn
-        (ValD NoExtField (FunBind NoExtField
-                                  (L dSpn (mkRdrUnqual (mkVarOcc "main")))
-                                  (MG NoExtField
-                                      (L dSpn [(L dSpn (Match matchAnn
-                                                              (FunRhs (L dSpn (mkRdrUnqual (mkVarOcc "main"))) Prefix NoSrcStrict)
-                                                              []
-                                                              (GRHSs (EpaComments []) [L nSpn (GRHS grhsAnn [] (L dSpn (HsDo doAnn (DoExpr Nothing) doExpr)))] (EmptyLocalBinds NoExtField))))])
-                                      FromSource)
-                                  []
-        ))
-
-    doExpr = L (SrcSpanAnn doExprAnn (RealSrcSpan dSrcSpn S.Nothing))
-        [ L dSpn (BodyStmt NoExtField
-                           (L dSpn (HsApp noEpAnn (L dSpn (HsVar NoExtField (L dSpn (mkRdrUnqual (mkVarOcc "putStrLn")))))
-                                                  (L dSpn (HsLit noEpAnn (HsString (SourceText "\"Hello world\"") (mkFastString "Hello world"))))))
-                           NoExtField
-                           NoExtField)
-        ]
 
 -- | Parse an identifier. This parser uses `isKeyword` to check that an identifier is not a
 --   keyword.
@@ -264,7 +285,7 @@ ident = byteStringOf $
 
 -- | Parse an identifier, throw a precise error on failure.
 ident' :: Parser B.ByteString
-ident' = ident `cut'` (Msg "identifier")
+ident' = ident `cut'` Msg "identifier"
 
 varid :: Parser B.ByteString
 varid = byteStringOf $
@@ -273,16 +294,16 @@ varid = byteStringOf $
 -- | Parse an identifier, throw a precise error on failure.
 tcOcc' :: Parser RdrName
 tcOcc' = do
-    x <- varid `cut'` (Msg "tcOcc")
+    x <- varid `cut'` Msg "tcOcc"
     pure $ mkRdrUnqual (mkTcOccFS (mkFastStringByteList (B.unpack x)))
 
 varOcc' :: Parser RdrName
 varOcc' = do
-    x <- varid `cut'` (Msg "varOcc")
+    x <- varid `cut'` Msg "varOcc"
     pure $ mkRdrUnqual (mkVarOccFS (mkFastStringByteList (B.unpack x)))
 
 withSpan' :: Parser a -> Parser (a, Span)
-withSpan' p = withSpan p (\x spn -> return (x, spn))
+withSpan' p = withSpan p (curry return)
 
 -- Convert from 0 indexed to 1 indexed rows and cols
 spanToRowCol :: Span -> B.ByteString -> ((Int, Int), (Int, Int))
@@ -303,8 +324,12 @@ srcSpanEpAnnNotUsed s str = SrcSpanAnn
     , locA = RealSrcSpan (rlSrcSpan s str) S.Nothing
     }
 
+srcSpanAnnDo :: Span -> B.ByteString -> XDo GhcPs
+srcSpanAnnDo s str = EpAnn (Anchor (rlSrcSpan s str) UnchangedAnchor)
+                     (AnnList (Just (Anchor (rlSrcSpan s str) UnchangedAnchor)) Nothing Nothing [AddEpAnn AnnDo (EpaSpan (rlSrcSpan s str))] [])
+                     (EpaComments [])
+
 rlSrcSpan :: Span -> B.ByteString -> RealSrcSpan
 rlSrcSpan s str = let ((ar, ac), (br, bc)) = spanToRowCol s str
                    in mkRealSrcSpan (mkRealSrcLoc "test/files/Basic.hs" ar ac)
                                     (mkRealSrcLoc "b" br bc)
-

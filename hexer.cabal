@@ -69,7 +69,7 @@ library
     -- other-extensions:
 
     -- Other library packages from which modules are imported.
-    build-depends:    base ^>=4.16.2.0
+    build-depends:    base
 
     -- Directories containing source files.
     hs-source-dirs:   src
@@ -87,14 +87,13 @@ executable hexer
     -- Modules included in this executable, other than Main.
     other-modules:
         Lexer
-        Show
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
 
     -- Other library packages from which modules are imported.
     build-depends:
-        base ^>=4.16.2.0,
+        base,
         bytestring,
         extra,
         flatparse,
@@ -142,5 +141,5 @@ test-suite hexer-test
 
     -- Test dependencies.
     build-depends:
-        base ^>=4.16.2.0,
+        base,
         hexer
