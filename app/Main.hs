@@ -228,23 +228,32 @@ fDecl2 = do
             str <- ask
             pure $ HsDo (srcSpanAnnDo s str) (DoExpr Nothing) x
     
-    psDo :: Parser (XRec GhcPs [ExprLStmt GhcPs])
-    psDo = pure $ L (SrcSpanAnn doExprAnn (RealSrcSpan dSrcSpn S.Nothing))
-        [ L dSpn (BodyStmt NoExtField
-                           (L dSpn (HsApp noEpAnn (L dSpn (HsVar NoExtField (L dSpn (mkRdrUnqual (mkVarOcc "putStrLn")))))
-                                                  (L dSpn (HsLit noEpAnn (HsString (SourceText "\"Hello world\"") (mkFastString "Hello world"))))))
-                           NoExtField
-                           NoExtField)
-        ]
-
-
-    doAnn    = EpAnn (Anchor dSrcSpn UnchangedAnchor)
-                     (AnnList (Just (Anchor dSrcSpn UnchangedAnchor)) Nothing Nothing [AddEpAnn AnnDo (EpaSpan dSrcSpn)] [])
-                     (EpaComments [])
 
     doExprAnn  = EpAnn (Anchor dSrcSpn UnchangedAnchor)
                      (AnnList (Just (Anchor dSrcSpn UnchangedAnchor)) Nothing Nothing [] [])
                      (EpaComments [])
+
+    psDo :: Parser (XRec GhcPs [ExprLStmt GhcPs])
+    psDo = withSpan psStmtLR buildExpr
+      where
+        buildExpr :: ExprLStmt GhcPs -> Span -> Parser (XRec GhcPs [ExprLStmt GhcPs])
+        buildExpr x s = do
+            str <- ask
+            pure $ L (SrcSpanAnn doExprAnn (RealSrcSpan (rlSrcSpan s str) S.Nothing)) [x]
+    
+    psStmtLR :: Parser (ExprLStmt GhcPs)
+    psStmtLR = withSpan psStmt buildExpr
+      where
+        buildExpr :: StmtLR GhcPs GhcPs (LocatedA (HsExpr GhcPs)) -> Span -> Parser (ExprLStmt GhcPs)
+        buildExpr x s = do
+            str <- ask
+            pure $ L (srcSpanEpAnnNotUsed s str) x 
+            
+    psStmt = pure $ BodyStmt NoExtField
+                             (L dSpn (HsApp noEpAnn (L dSpn (HsVar NoExtField (L dSpn (mkRdrUnqual (mkVarOcc "putStrLn")))))
+                                                    (L dSpn (HsLit noEpAnn (HsString (SourceText "\"Hello world\"") (mkFastString "Hello world"))))))
+                             NoExtField
+                             NoExtField
 
     noEpAnn    = EpAnn (Anchor dSrcSpn UnchangedAnchor)
                      NoEpAnns
