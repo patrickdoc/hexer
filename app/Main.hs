@@ -219,7 +219,7 @@ fDecl2 = do
         buildGRHSs x s = do
             str <- ask
             pure $ GRHSs (EpaComments []) [L nSpn (GRHS grhsAnn [] (L (srcSpanEpAnnNotUsed s str) x))] (EmptyLocalBinds NoExtField)
- 
+
     psHsExpr :: Parser (HsExpr GhcPs)
     psHsExpr = withSpan psDo buildHsDo
       where
@@ -227,7 +227,6 @@ fDecl2 = do
         buildHsDo x s = do
             str <- ask
             pure $ HsDo (srcSpanAnnDo s str) (DoExpr Nothing) x
-    
 
     doExprAnn  = EpAnn (Anchor dSrcSpn UnchangedAnchor)
                      (AnnList (Just (Anchor dSrcSpn UnchangedAnchor)) Nothing Nothing [] [])
@@ -240,20 +239,47 @@ fDecl2 = do
         buildExpr x s = do
             str <- ask
             pure $ L (SrcSpanAnn doExprAnn (RealSrcSpan (rlSrcSpan s str) S.Nothing)) [x]
-    
+
     psStmtLR :: Parser (ExprLStmt GhcPs)
     psStmtLR = withSpan psStmt buildExpr
       where
         buildExpr :: StmtLR GhcPs GhcPs (LocatedA (HsExpr GhcPs)) -> Span -> Parser (ExprLStmt GhcPs)
         buildExpr x s = do
             str <- ask
-            pure $ L (srcSpanEpAnnNotUsed s str) x 
-            
-    psStmt = pure $ BodyStmt NoExtField
-                             (L dSpn (HsApp noEpAnn (L dSpn (HsVar NoExtField (L dSpn (mkRdrUnqual (mkVarOcc "putStrLn")))))
-                                                    (L dSpn (HsLit noEpAnn (HsString (SourceText "\"Hello world\"") (mkFastString "Hello world"))))))
-                             NoExtField
-                             NoExtField
+            pure $ L (srcSpanEpAnnNotUsed s str) x
+
+    psStmt :: Parser (StmtLR GhcPs GhcPs (LocatedA (HsExpr GhcPs)))
+    psStmt = withSpan psApp buildExpr
+      where
+        buildExpr x s = do
+            str <- ask
+            pure $ BodyStmt NoExtField
+                            (L (srcSpanEpAnnNotUsed s str) x)
+                            NoExtField
+                            NoExtField
+    
+    psApp :: Parser (HsExpr GhcPs)
+    psApp = do
+        x <- psHsVar <* ws
+        y <- psHsLit <* ws
+        return $ buildExpr x y
+      where
+        buildExpr (x, s) (y, s') = do
+            str <- ask
+            pure $ HsApp noEpAnn (L (srcSpanEpAnnNotUsed s str) x)
+                                 (L (srcSpanEpAnnNotUsed s' str) y)
+
+    psHsVar :: Parser (HsExpr GhcPs)
+    psHsVar = withSpan varOcc' buildExpr
+      where
+        buildExpr :: RdrName -> Span -> Parser (HsExpr GhcPs)
+        buildExpr x s = do
+            str <- ask
+            pure $ HsVar NoExtField (L (srcSpanEpAnnNotUsed s str) x)
+
+    psHsLit :: Parser (HsExpr GhcPs)
+    psHsLit = pure $ HsLit noEpAnn (HsString (SourceText "\"Hello world\"") (mkFastString "Hello world"))
+
 
     noEpAnn    = EpAnn (Anchor dSrcSpn UnchangedAnchor)
                      NoEpAnns
