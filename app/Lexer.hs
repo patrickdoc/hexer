@@ -1,7 +1,7 @@
 module Lexer where
 
 -- Flatparse
-import FlatParse.Stateful hiding (Parser, runParser, string, char, cut)
+import FlatParse.Stateful hiding (Parser, runParser, string, cut)
 import qualified FlatParse.Stateful as FP
 import qualified Data.ByteString as B
 import Data.String
@@ -86,6 +86,16 @@ ws = $(switch [| case _ of
   "{-" -> multilineComment
   _    -> pure () |])
 
+str' :: Parser ()
+str' = do
+    $(char '"') `cut'` Msg "start string"
+    go
+  where
+    go = $(switch [| case _ of
+      "\\\"" -> go
+      "\""   -> pure ()
+      _      -> branch anyWord8 go (pure ()) |]) `cut'` Msg "string contents"
+
 -- | Consume whitespace after running a parser.
 token :: Parser a -> Parser a
 token p = p <* ws
@@ -105,7 +115,6 @@ identChar = satisfyAscii (\c -> isLatinLetter c || isDigit c)
 isKeyword :: Span -> Parser ()
 isKeyword span = inSpan span do
   $(FP.switch [| case _ of
-      "lam"   -> pure ()
       "let"   -> pure ()
       "in"    -> pure ()
       "if"    -> pure ()
