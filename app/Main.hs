@@ -194,18 +194,18 @@ psTyApp = do
 
 fDecl2 :: Parser (LHsDecl GhcPs)
 fDecl2 = do
-    idp <- psLIdP <* ws
+    idp <- withSpan' psLIdP <* ws
     $(symbol "=") <* ws
     $(symbol "do") <* ws
-    rhs <- psGRHSs
+    rhs <- withSpan' psGRHSs
     mkHsDecl idp rhs
   where
-    mkHsDecl :: LIdP GhcPs -> GRHSs GhcPs (LocatedA (HsExpr GhcPs)) -> Parser (LHsDecl GhcPs)
-    mkHsDecl idp rhs = do
+    mkHsDecl :: (LIdP GhcPs, Span) -> (GRHSs GhcPs (LocatedA (HsExpr GhcPs)), Span) -> Parser (LHsDecl GhcPs)
+    mkHsDecl (idp, s@(Span a _)) (rhs, s'@(Span _ b)) = do
       str <- ask
       let s = Span (Pos 1) (Pos 10)
       pure $ L
-        (srcSpanAnnListItem s str)
+        (srcSpanAnnListItem (Span a b) str)
         (ValD NoExtField (FunBind NoExtField
                                   idp
                                   (MG NoExtField
@@ -252,19 +252,21 @@ fDecl2 = do
     psStmt :: Parser (StmtLR GhcPs GhcPs (LocatedA (HsExpr GhcPs)))
     psStmt = withSpan psApp buildExpr
       where
+        buildExpr :: HsExpr GhcPs -> Span -> Parser (StmtLR GhcPs GhcPs (LocatedA (HsExpr GhcPs)))
         buildExpr x s = do
             str <- ask
             pure $ BodyStmt NoExtField
                             (L (srcSpanEpAnnNotUsed s str) x)
                             NoExtField
                             NoExtField
-    
+
     psApp :: Parser (HsExpr GhcPs)
     psApp = do
         x <- withSpan' psHsVar <* ws
         y <- withSpan' psHsLit
         buildExpr x y
       where
+        buildExpr :: (HsExpr GhcPs, Span) -> (HsExpr GhcPs, Span) -> Parser (HsExpr GhcPs)
         buildExpr (x, s@(Span a _)) (y, s'@(Span _ b)) = do
             str <- ask
             pure $ HsApp (noEpAnn (Span a b) str)
