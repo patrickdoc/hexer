@@ -195,21 +195,19 @@ psTyApp = do
 fDecl2 :: Parser (LHsDecl GhcPs)
 fDecl2 = do
     idp <- withSpan' psLIdP <* ws
-    $(symbol "=") <* ws
-    $(symbol "do") <* ws
     rhs <- withSpan' psGRHSs
     mkHsDecl idp rhs
   where
     mkHsDecl :: (LIdP GhcPs, Span) -> (GRHSs GhcPs (LocatedA (HsExpr GhcPs)), Span) -> Parser (LHsDecl GhcPs)
     mkHsDecl (idp, s@(Span a _)) (rhs, s'@(Span _ b)) = do
       str <- ask
-      let s = Span (Pos 1) (Pos 10)
+      let spn = Span a b
       pure $ L
         (srcSpanAnnListItem (Span a b) str)
         (ValD NoExtField (FunBind NoExtField
                                   idp
                                   (MG NoExtField
-                                      (L (srcSpanEpAnnNotUsed s str) [L (srcSpanEpAnnNotUsed s str) (Match (matchAnn s str)
+                                      (L (srcSpanEpAnnNotUsed spn str) [L (srcSpanEpAnnNotUsed spn str) (Match (matchAnn spn str)
                                                               (FunRhs idp Prefix NoSrcStrict)
                                                               []
                                                               rhs)])
@@ -218,20 +216,26 @@ fDecl2 = do
         ))
 
     psGRHSs :: Parser (GRHSs GhcPs (LocatedA (HsExpr GhcPs)))
-    psGRHSs = withSpan psHsExpr buildGRHSs
+    psGRHSs = do
+        eq <- withSpan' $(symbol "=") <* ws
+        ex <- withSpan' psHsExpr
+        buildGRHSs eq ex
       where
-        buildGRHSs :: HsExpr GhcPs -> Span -> Parser (GRHSs GhcPs (LocatedA (HsExpr GhcPs)))
-        buildGRHSs x s = do
+        buildGRHSs :: ((), Span) -> (HsExpr GhcPs, Span) -> Parser (GRHSs GhcPs (LocatedA (HsExpr GhcPs)))
+        buildGRHSs (_, s@(Span a _)) (x, s'@(Span _ b)) = do
             str <- ask
-            pure $ GRHSs (EpaComments []) [L (srcSpanEpAnnNotUsed s str) (GRHS (grhsAnn s str) [] (L (srcSpanEpAnnNotUsed s str) x))] (EmptyLocalBinds NoExtField)
+            pure $ GRHSs (EpaComments []) [L (srcSpanEpAnnNotUsed (Span a b) str) (GRHS (grhsAnn (Span a b) s str) [] (L (srcSpanEpAnnNotUsed s' str) x))] (EmptyLocalBinds NoExtField)
 
     psHsExpr :: Parser (HsExpr GhcPs)
-    psHsExpr = withSpan psDo buildHsDo
+    psHsExpr = do
+      x <- withSpan' $(symbol "do") <* ws
+      y <- withSpan' psDo
+      buildHsDo x y
       where
-        buildHsDo :: XRec GhcPs [ExprLStmt GhcPs] -> Span -> Parser (HsExpr GhcPs)
-        buildHsDo x s = do
+        buildHsDo :: ((), Span) -> (XRec GhcPs [ExprLStmt GhcPs], Span) -> Parser (HsExpr GhcPs)
+        buildHsDo (_, doSpn@(Span a _)) (x, stmtSpn@(Span _ b)) = do
             str <- ask
-            pure $ HsDo (srcSpanAnnDo s str) (DoExpr Nothing) x
+            pure $ HsDo (srcSpanAnnDo (Span a b) doSpn stmtSpn str) (DoExpr Nothing) x
 
     psDo :: Parser (XRec GhcPs [ExprLStmt GhcPs])
     psDo = withSpan psStmtLR buildExpr
@@ -342,9 +346,9 @@ srcSpanEpAnnNotUsed s str = SrcSpanAnn
     , locA = RealSrcSpan (rlSrcSpan s str) S.Nothing
     }
 
-srcSpanAnnDo :: Span -> B.ByteString -> XDo GhcPs
-srcSpanAnnDo s str = EpAnn (Anchor (rlSrcSpan s str) UnchangedAnchor)
-                     (AnnList (Just (Anchor (rlSrcSpan s str) UnchangedAnchor)) Nothing Nothing [AddEpAnn AnnDo (EpaSpan (rlSrcSpan s str))] [])
+srcSpanAnnDo :: Span -> Span -> Span -> B.ByteString -> XDo GhcPs
+srcSpanAnnDo s doSpn stmtSpn str = EpAnn (Anchor (rlSrcSpan s str) UnchangedAnchor)
+                     (AnnList (Just (Anchor (rlSrcSpan stmtSpn str) UnchangedAnchor)) Nothing Nothing [AddEpAnn AnnDo (EpaSpan (rlSrcSpan doSpn str))] [])
                      (EpaComments [])
 
 rlSrcSpan :: Span -> B.ByteString -> RealSrcSpan
@@ -367,6 +371,6 @@ doExprAnn s str = EpAnn (Anchor (rlSrcSpan s str) UnchangedAnchor)
 matchAnn s str = EpAnn (Anchor (rlSrcSpan s str) UnchangedAnchor)
                  []
                  (EpaComments [])
-grhsAnn s str = EpAnn (Anchor (rlSrcSpan s str) UnchangedAnchor)
-                 (GrhsAnn Nothing (AddEpAnn AnnEqual (EpaSpan (rlSrcSpan s str))))
+grhsAnn s s' str  = EpAnn (Anchor (rlSrcSpan s str) UnchangedAnchor)
+                 (GrhsAnn Nothing (AddEpAnn AnnEqual (EpaSpan (rlSrcSpan s' str))))
                  (EpaComments [])
