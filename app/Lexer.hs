@@ -88,13 +88,13 @@ ws = $(switch [| case _ of
 
 str' :: Parser ()
 str' = do
-    $(char '"') `cut'` Msg "start string"
+    $(char '"')
     go
   where
     go = $(switch [| case _ of
       "\\\"" -> go
       "\""   -> pure ()
-      _      -> branch anyWord8 go (pure ()) |]) `cut'` Msg "string contents"
+      _      -> branch anyWord8 go (pure ()) |])
 
 -- | Consume whitespace after running a parser.
 token :: Parser a -> Parser a

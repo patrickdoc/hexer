@@ -13,7 +13,7 @@ import System.Environment
 import System.IO
 
 -- Flatparse
-import FlatParse.Stateful hiding (Parser, runParser, string, cut)
+import FlatParse.Stateful hiding (Parser, runParser, string)
 import qualified FlatParse.Stateful as FP
 import qualified Data.ByteString as B
 import GHC.Data.FastString
@@ -75,11 +75,10 @@ psMod = do
     (x, s) <- withSpan' varid
     ws
     $(keyword "where") <* ws
-    d1 <- psLHsDecl <* ws
-    d2 <- fDecl2
+    ds <- some (psLHsDecl <* ws)
     str <- ask
     return $ mkGeneralLocated "1:1" (hsMod { hsmodName = Just (mkModName x s str)
-                                           , hsmodDecls = [d1,d2]
+                                           , hsmodDecls = ds
                                            })
   where
     hsMod = HsModule
@@ -102,7 +101,11 @@ psMod = do
              (mkModuleNameFS (mkFastStringByteList (B.unpack bs)))
 
 psLHsDecl :: Parser (LHsDecl GhcPs)
-psLHsDecl = withSpan psTypeSig buildHsDecl
+psLHsDecl = psSigD
+        <|> psValD
+
+psSigD :: Parser (LHsDecl GhcPs)
+psSigD = withSpan psTypeSig buildHsDecl
   where
     buildHsDecl :: Sig GhcPs -> Span -> Parser (LHsDecl GhcPs)
     buildHsDecl x s = do
@@ -110,7 +113,7 @@ psLHsDecl = withSpan psTypeSig buildHsDecl
         pure $ L (srcSpanAnnListItem s str) (SigD NoExtField x)
 
 psLIdP :: Parser (LIdP GhcPs)
-psLIdP = withSpan varOcc' buildLIdP
+psLIdP = withSpan varOcc buildLIdP
   where
     buildLIdP :: RdrName -> Span -> Parser (LIdP GhcPs)
     buildLIdP x s = do
@@ -141,9 +144,9 @@ psTypeSig :: Parser (Sig GhcPs)
 psTypeSig = do
     x <- withSpan' psLIdP
     ws
-    (_, s') <- withSpan' $(symbol' "::")
+    (_, s') <- withSpan' $(symbol "::")
     ws
-    hswc <- withSpan' $ psHsWC `cut'` Msg "HsWC"
+    hswc <- withSpan' psHsWC
     buildTypeSig x s' hswc
   where
     buildTypeSig :: (LIdP GhcPs, Span) -> Span -> (LHsSigWcType GhcPs, Span) -> Parser (Sig GhcPs)
@@ -182,18 +185,18 @@ psTupleTy = do
 
 psTyApp :: Parser (HsType GhcPs)
 psTyApp = do
-    x <- psTyVar `cut'` Msg "IO"
+    x <- psTyVar
     ws
-    y <- psTupleTy `cut'` Msg "()"
-    pure $ HsAppTy NoExtField x y
+    y <- psTupleTy
+    pure $ HsAppTy noExtField x y
 
 ---
 ---
 ---
 ---
 
-fDecl2 :: Parser (LHsDecl GhcPs)
-fDecl2 = do
+psValD :: Parser (LHsDecl GhcPs)
+psValD = do
     idp <- withSpan' psLIdP <* ws
     rhs <- withSpan' psGRHSs
     mkHsDecl idp rhs
@@ -215,83 +218,83 @@ fDecl2 = do
                                   []
         ))
 
-    psGRHSs :: Parser (GRHSs GhcPs (LocatedA (HsExpr GhcPs)))
-    psGRHSs = do
-        eq <- withSpan' $(symbol "=") <* ws
-        ex <- withSpan' psHsExpr
-        buildGRHSs eq ex
-      where
-        buildGRHSs :: ((), Span) -> (HsExpr GhcPs, Span) -> Parser (GRHSs GhcPs (LocatedA (HsExpr GhcPs)))
-        buildGRHSs (_, s@(Span a _)) (x, s'@(Span _ b)) = do
-            str <- ask
-            pure $ GRHSs (EpaComments []) [L (srcSpanEpAnnNotUsed (Span a b) str) (GRHS (grhsAnn (Span a b) s str) [] (L (srcSpanEpAnnNotUsed s' str) x))] (EmptyLocalBinds NoExtField)
+psGRHSs :: Parser (GRHSs GhcPs (LocatedA (HsExpr GhcPs)))
+psGRHSs = do
+    eq <- withSpan' $(symbol "=") <* ws
+    ex <- withSpan' psHsExpr
+    buildGRHSs eq ex
+  where
+    buildGRHSs :: ((), Span) -> (HsExpr GhcPs, Span) -> Parser (GRHSs GhcPs (LocatedA (HsExpr GhcPs)))
+    buildGRHSs (_, s@(Span a _)) (x, s'@(Span _ b)) = do
+        str <- ask
+        pure $ GRHSs (EpaComments []) [L (srcSpanEpAnnNotUsed (Span a b) str) (GRHS (grhsAnn (Span a b) s str) [] (L (srcSpanEpAnnNotUsed s' str) x))] (EmptyLocalBinds NoExtField)
 
-    psHsExpr :: Parser (HsExpr GhcPs)
-    psHsExpr = do
-      x <- withSpan' $(symbol "do") <* ws
-      y <- withSpan' psDo
-      buildHsDo x y
-      where
-        buildHsDo :: ((), Span) -> (XRec GhcPs [ExprLStmt GhcPs], Span) -> Parser (HsExpr GhcPs)
-        buildHsDo (_, doSpn@(Span a _)) (x, stmtSpn@(Span _ b)) = do
-            str <- ask
-            pure $ HsDo (srcSpanAnnDo (Span a b) doSpn stmtSpn str) (DoExpr Nothing) x
+psHsExpr :: Parser (HsExpr GhcPs)
+psHsExpr = do
+  x <- withSpan' $(symbol "do") <* ws
+  y <- withSpan' psDo
+  buildHsDo x y
+  where
+    buildHsDo :: ((), Span) -> (XRec GhcPs [ExprLStmt GhcPs], Span) -> Parser (HsExpr GhcPs)
+    buildHsDo (_, doSpn@(Span a _)) (x, stmtSpn@(Span _ b)) = do
+        str <- ask
+        pure $ HsDo (srcSpanAnnDo (Span a b) doSpn stmtSpn str) (DoExpr Nothing) x
 
-    psDo :: Parser (XRec GhcPs [ExprLStmt GhcPs])
-    psDo = withSpan psStmtLR buildExpr
-      where
-        buildExpr :: ExprLStmt GhcPs -> Span -> Parser (XRec GhcPs [ExprLStmt GhcPs])
-        buildExpr x s = do
-            str <- ask
-            pure $ L (SrcSpanAnn (doExprAnn s str) (RealSrcSpan (rlSrcSpan s str) S.Nothing)) [x]
+psDo :: Parser (XRec GhcPs [ExprLStmt GhcPs])
+psDo = withSpan psStmtLR buildExpr
+  where
+    buildExpr :: ExprLStmt GhcPs -> Span -> Parser (XRec GhcPs [ExprLStmt GhcPs])
+    buildExpr x s = do
+        str <- ask
+        pure $ L (SrcSpanAnn (doExprAnn s str) (RealSrcSpan (rlSrcSpan s str) S.Nothing)) [x]
 
-    psStmtLR :: Parser (ExprLStmt GhcPs)
-    psStmtLR = withSpan psStmt buildExpr
-      where
-        buildExpr :: StmtLR GhcPs GhcPs (LocatedA (HsExpr GhcPs)) -> Span -> Parser (ExprLStmt GhcPs)
-        buildExpr x s = do
-            str <- ask
-            pure $ L (srcSpanEpAnnNotUsed s str) x
+psStmtLR :: Parser (ExprLStmt GhcPs)
+psStmtLR = withSpan psStmt buildExpr
+  where
+    buildExpr :: StmtLR GhcPs GhcPs (LocatedA (HsExpr GhcPs)) -> Span -> Parser (ExprLStmt GhcPs)
+    buildExpr x s = do
+        str <- ask
+        pure $ L (srcSpanEpAnnNotUsed s str) x
 
-    psStmt :: Parser (StmtLR GhcPs GhcPs (LocatedA (HsExpr GhcPs)))
-    psStmt = withSpan psApp buildExpr
-      where
-        buildExpr :: HsExpr GhcPs -> Span -> Parser (StmtLR GhcPs GhcPs (LocatedA (HsExpr GhcPs)))
-        buildExpr x s = do
-            str <- ask
-            pure $ BodyStmt NoExtField
-                            (L (srcSpanEpAnnNotUsed s str) x)
-                            NoExtField
-                            NoExtField
+psStmt :: Parser (StmtLR GhcPs GhcPs (LocatedA (HsExpr GhcPs)))
+psStmt = withSpan psApp buildExpr
+  where
+    buildExpr :: HsExpr GhcPs -> Span -> Parser (StmtLR GhcPs GhcPs (LocatedA (HsExpr GhcPs)))
+    buildExpr x s = do
+        str <- ask
+        pure $ BodyStmt NoExtField
+                        (L (srcSpanEpAnnNotUsed s str) x)
+                        NoExtField
+                        NoExtField
 
-    psApp :: Parser (HsExpr GhcPs)
-    psApp = do
-        x <- withSpan' psHsVar <* ws
-        y <- withSpan' psHsLit
-        buildExpr x y
-      where
-        buildExpr :: (HsExpr GhcPs, Span) -> (HsExpr GhcPs, Span) -> Parser (HsExpr GhcPs)
-        buildExpr (x, s@(Span a _)) (y, s'@(Span _ b)) = do
-            str <- ask
-            pure $ HsApp (noEpAnn (Span a b) str)
-                         (L (srcSpanEpAnnNotUsed s str) x)
-                         (L (srcSpanEpAnnNotUsed s' str) y)
+psApp :: Parser (HsExpr GhcPs)
+psApp = do
+    x <- withSpan' psHsVar <* ws
+    y <- withSpan' psHsLit
+    buildExpr x y
+  where
+    buildExpr :: (HsExpr GhcPs, Span) -> (HsExpr GhcPs, Span) -> Parser (HsExpr GhcPs)
+    buildExpr (x, s@(Span a _)) (y, s'@(Span _ b)) = do
+        str <- ask
+        pure $ HsApp (noEpAnn (Span a b) str)
+                     (L (srcSpanEpAnnNotUsed s str) x)
+                     (L (srcSpanEpAnnNotUsed s' str) y)
 
-    psHsVar :: Parser (HsExpr GhcPs)
-    psHsVar = withSpan varOcc' buildExpr
-      where
-        buildExpr :: RdrName -> Span -> Parser (HsExpr GhcPs)
-        buildExpr x s = do
-            str <- ask
-            pure $ HsVar NoExtField (L (srcSpanEpAnnNotUsed s str) x)
+psHsVar :: Parser (HsExpr GhcPs)
+psHsVar = withSpan varOcc buildExpr
+  where
+    buildExpr :: RdrName -> Span -> Parser (HsExpr GhcPs)
+    buildExpr x s = do
+        str <- ask
+        pure $ HsVar NoExtField (L (srcSpanEpAnnNotUsed s str) x)
 
-    psHsLit :: Parser (HsExpr GhcPs)
-    psHsLit = withSpan litString buildExpr
-      where
-        buildExpr :: HsLit GhcPs -> Span -> Parser (HsExpr GhcPs)
-        buildExpr x s = do
-          str <- ask
-          pure $ HsLit (noEpAnn s str) x
+psHsLit :: Parser (HsExpr GhcPs)
+psHsLit = withSpan litString buildExpr
+  where
+    buildExpr :: HsLit GhcPs -> Span -> Parser (HsExpr GhcPs)
+    buildExpr x s = do
+      str <- ask
+      pure $ HsLit (noEpAnn s str) x
 
 -- | Parse an identifier. This parser uses `isKeyword` to check that an identifier is not a
 --   keyword.
@@ -308,14 +311,14 @@ varid = byteStringOf $
     withSpan (identStartChar *> skipMany identChar) (\_ spn -> fails (isKeyword spn))
 
 -- | Parse an identifier, throw a precise error on failure.
-tcOcc' :: Parser RdrName
-tcOcc' = do
-    x <- varid `cut'` Msg "tcOcc"
+tcOcc :: Parser RdrName
+tcOcc = do
+    x <- varid
     pure $ mkRdrUnqual (mkTcOccFS (mkFastStringByteList (B.unpack x)))
 
-varOcc' :: Parser RdrName
-varOcc' = do
-    x <- varid `cut'` Msg "varOcc"
+varOcc :: Parser RdrName
+varOcc = do
+    x <- varid
     pure $ mkRdrUnqual (mkVarOccFS (mkFastStringByteList (B.unpack x)))
 
 litString :: Parser (HsLit GhcPs)
